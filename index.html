@@ -900,7 +900,7 @@
         if(cur.paused){ done = true; return; }
         return;
       }
-      if(wasReading){ wasReading = false; lastScreen = null; render(); done = true; return; } // opens the answer buttons
+      if(wasReading){ wasReading = false; done = true; setTimeout(function(){ lastScreen = null; render(); }, 0); return; } // re-render (after this tick stops) to open the answer buttons
       bar.style.transform = "scaleX(" + (remaining/limit) + ")";
       num.textContent = (cur.paused ? "⏸ " : "") + Math.ceil(remaining/1000) + "s";
       if(cur.paused){ done = true; return; } // nothing ticks until resume re-renders
