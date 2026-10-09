@@ -10,7 +10,8 @@ A live, Kahoot-style multiplayer quiz on the forefoot. Students join from their 
     2nd metatarsal "keystone", MTP joint classification, deep transverse metatarsal ligament
   - Q6-10, active structures: fibularis longus insertion, flexor hallucis brevis innervation,
     lumbrical origin, interossei innervation, deep plantar artery
-- 20-second timer per question (configurable, 10-60s), speed-weighted scoring
+- 5-second reading window on each question (answers locked, "Read 5s" countdown), then a
+  20-second answer timer (configurable, 10-60s); speed-weighted scoring counts from when answers open
 - Host-only Pause / Resume (button, or Space / P)
 - Live leaderboard, final podium, automatic winner
 
