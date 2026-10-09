@@ -255,6 +255,8 @@
   .pausedbanner span{color:var(--text-dim);font-size:13px;line-height:1.4;}
   .timerwrap.paused .timerbar{filter:grayscale(1);opacity:.55;}
   .timerwrap.paused .timernum{color:var(--gold);}
+  .timerwrap.reading .timerbar{filter:grayscale(1);opacity:.45;}
+  .timerwrap.reading .timernum{min-width:4.2em;color:#6b6b80;}
   .pauseoverlay{
     position:fixed;inset:0;z-index:10000;display:flex;align-items:center;justify-content:center;
     padding:24px;text-align:center;
@@ -300,6 +302,7 @@
   var sb = null, sbError = null, serverOffset = 0;
   var roomCode = null, isHost = false, myPid = null;
   var roomChannel = null, roomLoaded = false, room = null;
+  var wasReading = false;
   var lastScreen = null, tickHandle = null, hubTab = "invite", qrDrawn = null;
   var autoRevealQi = null, jumpScareHandle = null, lockInHandle = null;
   var lockInShownQi = null;
@@ -317,6 +320,11 @@
   // revealStartedAt is listed so a future reveal/auto-advance timer is covered.
   var TIMER_KEYS = ["questionStartedAt", "revealStartedAt"];
 
+  // Reading window: each question is shown for READ_MS before its answer clock
+  // starts. The host writes questionStartedAt = now + READ_MS, so elapsedMs is
+  // negative while players read, and pause/resume shifts it like any other time.
+  var READ_MS = 5000;
+
   // ms since the question started, excluding paused time. While paused the
   // clock is pinned at pausedAt, so the value is frozen.
   function elapsedMs(st, nowMs){
@@ -327,7 +335,12 @@
   // ms left on the question clock (never negative).
   function remainingMs(st, limitMs, nowMs){
     if(!st || !st.questionStartedAt) return limitMs;
-    return Math.max(0, limitMs - elapsedMs(st, nowMs));
+    return Math.max(0, Math.min(limitMs, limitMs - elapsedMs(st, nowMs)));
+  }
+  // ms left in the reading window before answers open (0 once the clock runs).
+  function readLeftMs(st, nowMs){
+    if(!st || !st.questionStartedAt) return 0;
+    return Math.max(0, -elapsedMs(st, nowMs));
   }
   // State fields written when the host pauses.
   function pausePatch(serverTs){ return { paused: true, pausedAt: serverTs }; }
@@ -596,7 +609,7 @@
     return pausedBanner("host") + '<div class="card qbox">' +
         '<div class="qcount">Question ' + (qi+1) + ' of ' + QUESTIONS.length + ' &middot; ' + answered + '/' + ps.length + ' answered</div>' +
         '<div class="qtext">' + esc(q.q) + '</div>' +
-        '<div class="timerwrap' + (st.paused ? " paused" : "") + '"><div class="timertrack"><div class="timerbar" id="timerbar"></div></div><div class="timernum" id="timernum">' + settings().timeLimitSec + 's</div></div>' +
+        '<div class="timerwrap' + (st.paused ? " paused" : "") + '"><div class="timertrack"><div class="timerbar" id="timerbar"></div></div><div class="timernum" id="timernum">' + (readLeftMs(st, now()) > 0 ? "Read" : settings().timeLimitSec + "s") + '</div></div>' +
       '</div>' +
       '<div class="answers">' + tiles + '</div>';
   }
@@ -654,15 +667,16 @@
       var mp2 = myPlayer();
       var already = mp2 && mp2.answers && mp2.answers[qi];
       var isPaused = !!st.paused;
+      var reading = readLeftMs(st, now()) > 0;
       var tiles = ANS_META.map(function(m, idx){
         var picked = already && already.choice===idx;
-        return '<button class="ans ' + m.key + (picked?" picked":"") + '" data-idx="' + idx + '"' + ((already||isPaused)?" disabled":"") + '>' +
+        return '<button class="ans ' + m.key + (picked?" picked":"") + '" data-idx="' + idx + '"' + ((already||isPaused||reading)?" disabled":"") + '>' +
           shapeSvg(m.shape) + '<span>' + esc(q.options[idx]) + '</span></button>';
       }).join("");
       return '<div class="card qbox">' +
           '<div class="qcount">Question ' + (qi+1) + ' of ' + QUESTIONS.length + '</div>' +
           '<div class="qtext">' + esc(q.q) + '</div>' +
-          '<div class="timerwrap' + (isPaused ? " paused" : "") + '"><div class="timertrack"><div class="timerbar" id="timerbar"></div></div><div class="timernum" id="timernum">' + settings().timeLimitSec + 's</div></div>' +
+          '<div class="timerwrap' + (isPaused ? " paused" : "") + '"><div class="timertrack"><div class="timerbar" id="timerbar"></div></div><div class="timernum" id="timernum">' + (readLeftMs(st, now()) > 0 ? "Read" : settings().timeLimitSec + "s") + '</div></div>' +
         '</div>' +
         '<div class="answers">' + tiles + '</div>' +
         (already? '<div class="waiting" style="padding-top:14px;">Answer locked in — waiting for the others…</div>' : '');
@@ -873,8 +887,20 @@
       if(!bar || !num) return;
       // While paused this is pinned at pausedAt, so the display is frozen.
       var remaining = remainingMs(cur, limit, now());
+      var readLeft = readLeftMs(cur, now());
       var wrap = bar.parentNode && bar.parentNode.parentNode;
-      if(wrap) wrap.classList.toggle("paused", !!cur.paused);
+      if(wrap){
+        wrap.classList.toggle("paused", !!cur.paused);
+        wrap.classList.toggle("reading", readLeft > 0);
+      }
+      if(readLeft > 0){
+        bar.style.transform = "scaleX(" + (readLeft/READ_MS) + ")";
+        num.textContent = (cur.paused ? "⏸ " : "") + "Read " + Math.ceil(readLeft/1000) + "s";
+        wasReading = true;
+        if(cur.paused){ done = true; return; }
+        return;
+      }
+      if(wasReading){ wasReading = false; lastScreen = null; render(); done = true; return; } // opens the answer buttons
       bar.style.transform = "scaleX(" + (remaining/limit) + ")";
       num.textContent = (cur.paused ? "⏸ " : "") + Math.ceil(remaining/1000) + "s";
       if(cur.paused){ done = true; return; } // nothing ticks until resume re-renders
@@ -1130,6 +1156,7 @@
     // Paused time never counts: questionStartedAt is shifted forward on every
     // resume, so this is time actually spent with the clock running.
     var elapsed = elapsedMs(st, now());
+    if(elapsed < 0) return; // still in the reading window
     if(elapsed > limit) return; // past the time limit
     var timeMs = Math.max(0, Math.min(limit, elapsed));
     var correct = choiceIdx === questionAt(qi).correct;
@@ -1176,7 +1203,7 @@
       }
     }
     serverNowMs().then(function(ts){
-      roomSet(["state"], { status:"question", qIndex:0, order:order, questionStartedAt: ts });
+      roomSet(["state"], { status:"question", qIndex:0, order:order, questionStartedAt: ts + READ_MS });
     });
   }
 
@@ -1213,7 +1240,7 @@
         return roomMerge(["state"], { status:"ended", paused:false, pausedAt:null });
       }
       return serverNowMs().then(function(ts){
-        return roomMerge(["state"], { status:"question", qIndex: next, questionStartedAt: ts, paused:false, pausedAt:null });
+        return roomMerge(["state"], { status:"question", qIndex: next, questionStartedAt: ts + READ_MS, paused:false, pausedAt:null });
       });
     });
   }
